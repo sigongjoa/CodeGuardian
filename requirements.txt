@@ -1,0 +1,7 @@
+PyQt5>=5.15.0
+networkx>=2.5
+matplotlib>=3.4.0
+plotly>=5.0.0
+graphviz>=0.16
+watchdog>=2.1.0
+PyQtWebEngine

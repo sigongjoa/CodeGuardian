@@ -1,0 +1,19 @@
+{
+    "monitor": {
+        "paths": [],
+        "interval": 5
+    },
+    "protection": {
+        "auto_restore": true,
+        "backup_location": "backups/"
+    },
+    "ui": {
+        "theme": "dark",
+        "auto_refresh": true,
+        "call_depth": 2
+    },
+    "tracer": {
+        "auto_start": true,
+        "log_args": false
+    }
+}
