@@ -73,6 +73,11 @@ def helper_function(value):
         print(f"에러 정보 저장: {error_info}")
         raise
 
+def test_function():
+    """테스트용 함수"""
+    print("test_function 호출")
+    calculate_division(1, 0)
+
 def syntax_error_simulation():
     """구문 오류를 시뮬레이션하는 함수"""
     try:

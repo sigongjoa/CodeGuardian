@@ -5,15 +5,84 @@
 
 import sys
 import os
+import re
 import traceback
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                             QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-                            QSplitter, QTextEdit, QCheckBox, QComboBox, QMessageBox)
+                            QSplitter, QTextEdit, QCheckBox, QComboBox, QMessageBox,
+                            QGroupBox, QTreeWidget, QTreeWidgetItem)
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
+from PyQt5.QtGui import QFont, QSyntaxHighlighter, QTextCharFormat, QColor
 
 # 상대 경로로 다른 모듈 접근
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from core.core import code_guardian
+
+class PythonHighlighter(QSyntaxHighlighter):
+    """파이썬 구문 강조 클래스"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.highlighting_rules = []
+        
+        # 키워드 강조
+        keyword_format = QTextCharFormat()
+        keyword_format.setForeground(QColor('#569CD6'))  # 파란색
+        keyword_format.setFontWeight(QFont.Bold)
+        
+        keywords = [
+            'and', 'as', 'assert', 'break', 'class', 'continue', 'def',
+            'del', 'elif', 'else', 'except', 'exec', 'finally', 'for',
+            'from', 'global', 'if', 'import', 'in', 'is', 'lambda',
+            'not', 'or', 'pass', 'print', 'raise', 'return', 'try',
+            'while', 'with', 'yield'
+        ]
+        
+        for word in keywords:
+            pattern = r'\b{}\b'.format(word)
+            self.highlighting_rules.append((re.compile(pattern), keyword_format))
+        
+        # 클래스 이름 강조
+        class_format = QTextCharFormat()
+        class_format.setForeground(QColor('#4EC9B0'))  # 청록색
+        class_format.setFontWeight(QFont.Bold)
+        self.highlighting_rules.append((re.compile(r'\bclass\s+(\w+)'), class_format))
+        
+        # 함수 정의 강조
+        function_format = QTextCharFormat()
+        function_format.setForeground(QColor('#DCDCAA'))  # 황금색
+        function_format.setFontWeight(QFont.Bold)
+        self.highlighting_rules.append((re.compile(r'\bdef\s+(\w+)'), function_format))
+        
+        # 문자열 강조
+        string_format = QTextCharFormat()
+        string_format.setForeground(QColor('#CE9178'))  # 오렌지
+        self.highlighting_rules.append((re.compile(r'"[^"\\]*(\\.[^"\\]*)*"'), string_format))
+        self.highlighting_rules.append((re.compile(r"'[^'\\]*(\\.[^'\\]*)*'"), string_format))
+        
+        # 주석 강조
+        comment_format = QTextCharFormat()
+        comment_format.setForeground(QColor('#608B4E'))  # 녹색
+        self.highlighting_rules.append((re.compile(r'#[^\n]*'), comment_format))
+        
+        # 숫자 강조
+        number_format = QTextCharFormat()
+        number_format.setForeground(QColor('#B5CEA8'))  # 밝은 녹색
+        self.highlighting_rules.append((re.compile(r'\b[0-9]+\b'), number_format))
+        
+        # 셀프 참조 강조
+        self_format = QTextCharFormat()
+        self_format.setForeground(QColor('#569CD6'))  # 파란색
+        self_format.setFontWeight(QFont.Bold)
+        self.highlighting_rules.append((re.compile(r'\bself\b'), self_format))
+    
+    def highlightBlock(self, text):
+        """텍스트 블록에 구문 강조 적용"""
+        for pattern, format in self.highlighting_rules:
+            for match in pattern.finditer(text):
+                start = match.start()
+                length = match.end() - start
+                self.setFormat(start, length, format)
 
 class ErrorAnalysisView(QWidget):
     """에러 분석 뷰 클래스"""
@@ -23,6 +92,10 @@ class ErrorAnalysisView(QWidget):
         self.init_ui()
         self.current_error_data = []
         
+        # 테스트 파일 경로 설정
+        self.error_test_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 
+                                           "tests", "error_test.py")
+        
         # 지연 로딩 - 구성요소가 모두 초기화된 후 데이터 로딩
         QTimer.singleShot(500, self.delayed_loading)
     
@@ -30,12 +103,58 @@ class ErrorAnalysisView(QWidget):
         """지연 로딩 함수 - 컴포넌트 초기화 후 호출"""
         try:
             self.refresh_error_data()
+            self.load_test_functions()
         except Exception as e:
             print(f"초기 데이터 로딩 중 오류: {str(e)}")
+            traceback.print_exc()
     
     def init_ui(self):
         """UI 구성"""
-        main_layout = QVBoxLayout()
+        main_layout = QHBoxLayout()  # 전체 레이아웃을 수평으로 변경
+        
+        # 왼쪽 패널: 함수 목록과 코드 뷰어
+        left_panel = QVBoxLayout()
+        
+        # 함수 트리 그룹
+        func_group = QGroupBox("테스트 함수 목록")
+        func_layout = QVBoxLayout()
+        
+        # 함수 트리 위젯
+        self.function_tree = QTreeWidget()
+        self.function_tree.setHeaderLabels(["함수 이름"])
+        self.function_tree.setMinimumWidth(250)
+        self.function_tree.itemClicked.connect(self.on_function_selected)
+        
+        func_layout.addWidget(self.function_tree)
+        func_group.setLayout(func_layout)
+        
+        # 코드 뷰어 그룹
+        code_group = QGroupBox("함수 코드")
+        code_layout = QVBoxLayout()
+        
+        # 코드 에디터
+        self.code_editor = QTextEdit()
+        self.code_editor.setReadOnly(True)
+        self.code_editor.setFont(QFont("Consolas", 10))
+        self.code_editor.setMinimumHeight(300)
+        
+        # 구문 강조 설정
+        self.highlighter = PythonHighlighter(self.code_editor.document())
+        
+        code_layout.addWidget(self.code_editor)
+        code_group.setLayout(code_layout)
+        
+        # 왼쪽 패널에 추가
+        left_panel.addWidget(func_group)
+        left_panel.addWidget(code_group)
+        
+        # 왼쪽 패널 위젯 생성
+        left_widget = QWidget()
+        left_widget.setLayout(left_panel)
+        left_widget.setMinimumWidth(350)
+        
+        # 오른쪽 패널: 에러 분석
+        right_panel = QVBoxLayout()
         
         # 상단 컨트롤 패널
         control_panel = QHBoxLayout()
@@ -129,9 +248,17 @@ class ErrorAnalysisView(QWidget):
         splitter.addWidget(details_container)
         splitter.setSizes([500, 200])
         
-        # 메인 레이아웃에 추가
-        main_layout.addLayout(control_panel)
-        main_layout.addWidget(splitter)
+        # 오른쪽 패널에 추가
+        right_panel.addLayout(control_panel)
+        right_panel.addWidget(splitter)
+        
+        # 오른쪽 패널 위젯 생성
+        right_widget = QWidget()
+        right_widget.setLayout(right_panel)
+        
+        # 전체 레이아웃에 왼쪽과 오른쪽 패널 추가
+        main_layout.addWidget(left_widget, 1)  # 1:2 비율로 설정
+        main_layout.addWidget(right_widget, 2)
         
         self.setLayout(main_layout)
     
@@ -259,7 +386,148 @@ class ErrorAnalysisView(QWidget):
             return
             
         if row_index < len(self.current_error_data):
-            self.update_error_details(self.current_error_data[row_index])
+            error = self.current_error_data[row_index]
+            self.update_error_details(error)
+            
+            # 해당 함수의 코드도 표시
+            function_name = error.get('function_name', '')
+            if function_name:
+                self.show_function_code(function_name)
+    
+    def load_test_functions(self):
+        """테스트 함수 목록 로드"""
+        try:
+            # 트리 초기화
+            self.function_tree.clear()
+            
+            if not os.path.exists(self.error_test_file):
+                # 파일이 없을 경우 메시지 표시
+                item = QTreeWidgetItem(["테스트 파일을 찾을 수 없습니다"])
+                self.function_tree.addTopLevelItem(item)
+                return
+            
+            # 파일에서 함수 정의 추출
+            with open(self.error_test_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 함수 정의 찾기 (정규식)
+            function_pattern = re.compile(r'def\s+(\w+)\s*\(([^)]*)\):', re.MULTILINE)
+            matches = function_pattern.finditer(content)
+            
+            # 루트 노드 추가
+            file_name = os.path.basename(self.error_test_file)
+            root_item = QTreeWidgetItem([file_name])
+            self.function_tree.addTopLevelItem(root_item)
+            
+            # 각 함수를 트리에 추가
+            for match in matches:
+                func_name = match.group(1)
+                func_item = QTreeWidgetItem([func_name])
+                # 함수 코드 시작 위치 저장
+                func_item.setData(0, Qt.UserRole, match.start())
+                root_item.addChild(func_item)
+            
+            # 트리 확장
+            root_item.setExpanded(True)
+            
+            # 함수를 찾지 못했을 경우
+            if root_item.childCount() == 0:
+                func_item = QTreeWidgetItem(["함수를 찾을 수 없습니다"])
+                root_item.addChild(func_item)
+            
+        except Exception as e:
+            # 에러 발생 시 처리
+            print(f"함수 목록 로드 중 오류: {str(e)}")
+            traceback.print_exc()
+            
+            item = QTreeWidgetItem([f"오류: {str(e)}"])
+            self.function_tree.addTopLevelItem(item)
+    
+    def on_function_selected(self, item, column):
+        """함수 선택 시 코드 표시"""
+        # 선택한 항목이 함수인지 확인
+        if not item.parent():  # 루트 노드(파일)인 경우
+            return
+        
+        # 함수 위치 가져오기 (저장된 데이터)
+        func_pos = item.data(0, Qt.UserRole)
+        if func_pos is None:
+            self.code_editor.setText("함수 정보를 찾을 수 없습니다")
+            return
+        
+        # 함수 코드 추출
+        func_name = item.text(0)
+        self.show_function_code(func_name, func_pos)
+        
+        # 에러 데이터에서 해당 함수 관련 에러만 필터링
+        self.function_filter.setText(func_name)
+        self.refresh_error_data()
+    
+    def show_function_code(self, func_name, func_pos=None):
+        """함수 코드 표시
+        
+        Args:
+            func_name: 함수 이름
+            func_pos: 함수 시작 위치 (없으면 이름으로 검색)
+        """
+        try:
+            if not os.path.exists(self.error_test_file):
+                self.code_editor.setText(f"테스트 파일을 찾을 수 없습니다: {self.error_test_file}")
+                return
+            
+            with open(self.error_test_file, 'r', encoding='utf-8') as f:
+                content = f.readlines()
+                
+            # 함수 찾기
+            if func_pos is None:
+                # 위치가 주어지지 않은 경우 함수 이름으로 검색
+                pattern = re.compile(r'def\s+' + re.escape(func_name) + r'\s*\(')
+                func_start = None
+                for i, line in enumerate(content):
+                    if pattern.search(line):
+                        func_start = i
+                        break
+                
+                if func_start is None:
+                    self.code_editor.setText(f"함수를 찾을 수 없음: {func_name}")
+                    return
+            else:
+                # 위치가 주어진 경우 해당 위치의 행 찾기
+                func_start = 0
+                pos = 0
+                for i, line in enumerate(content):
+                    if pos + len(line) > func_pos:
+                        func_start = i
+                        break
+                    pos += len(line)
+            
+            # 함수 코드 추출
+            func_code = []
+            indentation = len(content[func_start]) - len(content[func_start].lstrip())
+            func_code.append(content[func_start])
+            
+            i = func_start + 1
+            while i < len(content):
+                line = content[i]
+                if line.strip() == '' or line.strip().startswith('#'):
+                    func_code.append(line)
+                    i += 1
+                    continue
+                
+                current_indent = len(line) - len(line.lstrip())
+                if current_indent <= indentation and line.strip():
+                    break
+                
+                func_code.append(line)
+                i += 1
+            
+            # 코드 에디터에 표시
+            self.code_editor.setText(''.join(func_code))
+            
+        except Exception as e:
+            print(f"함수 코드 표시 중 오류: {str(e)}")
+            traceback.print_exc()
+            self.code_editor.setText(f"코드 로딩 오류: {str(e)}")
     
     def update_error_details(self, error=None):
         """에러 상세 정보 업데이트
@@ -286,6 +554,11 @@ class ErrorAnalysisView(QWidget):
         details += f"<p><b>에러 메시지:</b> {error.get('error_message', 'No message')}</p>"
         details += f"<p><b>시간:</b> {error.get('timestamp', '')}</p>"
         
+        # 함수 코드 링크 추가
+        function_name = error.get('function_name', '')
+        if function_name:
+            details += f"<p><button onclick='showCode(\"{function_name}\")'>함수 코드 보기</button></p>"
+        
         # 스택 트레이스 추가 (옵션에 따라)
         if self.show_stack_trace.isChecked() and 'stack_trace' in error:
             details += f"<h3>스택 트레이스</h3>"
@@ -298,3 +571,27 @@ class ErrorAnalysisView(QWidget):
         
         # HTML로 설정
         self.error_details.setHtml(details)
+        
+        # 에러와 관련된 함수가 있으면 트리에서 자동 선택
+        if function_name:
+            self.select_function_in_tree(function_name)
+    
+    def select_function_in_tree(self, function_name):
+        """트리에서 함수 선택"""
+        # 루트 노드 가져오기
+        if self.function_tree.topLevelItemCount() == 0:
+            return
+            
+        root_item = self.function_tree.topLevelItem(0)
+        
+        # 모든 함수 아이템 확인
+        for i in range(root_item.childCount()):
+            func_item = root_item.child(i)
+            if func_item.text(0) == function_name:
+                # 함수 선택
+                self.function_tree.setCurrentItem(func_item)
+                
+                # 함수 코드 표시
+                func_pos = func_item.data(0, Qt.UserRole)
+                self.show_function_code(function_name, func_pos)
+                return
