@@ -10,7 +10,7 @@ import traceback
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                             QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
                             QSplitter, QTextEdit, QCheckBox, QComboBox, QMessageBox,
-                            QGroupBox, QTreeWidget, QTreeWidgetItem)
+                            QGroupBox, QTreeWidget, QTreeWidgetItem, QFileDialog)
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 from PyQt5.QtGui import QFont, QSyntaxHighlighter, QTextCharFormat, QColor
 
@@ -96,12 +96,25 @@ class ErrorAnalysisView(QWidget):
         self.error_test_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 
                                            "tests", "error_test.py")
         
+        # 테스트 파일 목록
+        self.test_files = [
+            self.error_test_file,
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "test_errors.py")
+        ]
+        
         # 지연 로딩 - 구성요소가 모두 초기화된 후 데이터 로딩
         QTimer.singleShot(500, self.delayed_loading)
     
     def delayed_loading(self):
         """지연 로딩 함수 - 컴포넌트 초기화 후 호출"""
         try:
+            # 테스트 파일 목록 로드
+            self.load_test_file_list()
+            
+            # 처음에는 첫 번째 파일 선택
+            if self.file_combo.count() > 0:
+                self.file_combo.setCurrentIndex(0)
+            
             self.refresh_error_data()
             self.load_test_functions()
         except Exception as e:
@@ -119,14 +132,33 @@ class ErrorAnalysisView(QWidget):
         func_group = QGroupBox("테스트 함수 목록")
         func_layout = QVBoxLayout()
         
+        # 테스트 파일 선택 컬트롤 추가
+        file_control = QHBoxLayout()
+        file_label = QLabel("테스트 파일:")
+        self.file_combo = QComboBox()
+        self.file_combo.setMinimumWidth(180)
+        
+        # 파일 선택버튼 추가
+        self.select_file_btn = QPushButton("파일 선택...")
+        self.select_file_btn.clicked.connect(self.on_select_file_clicked)
+        
+        file_control.addWidget(file_label)
+        file_control.addWidget(self.file_combo, 1)
+        file_control.addWidget(self.select_file_btn)
+        
         # 함수 트리 위젯
         self.function_tree = QTreeWidget()
         self.function_tree.setHeaderLabels(["함수 이름"])
         self.function_tree.setMinimumWidth(250)
         self.function_tree.itemClicked.connect(self.on_function_selected)
         
+        # 레이아웃에 추가
+        func_layout.addLayout(file_control)
         func_layout.addWidget(self.function_tree)
         func_group.setLayout(func_layout)
+        
+        # 파일 선택 변경 이벤트 연결
+        self.file_combo.currentIndexChanged.connect(self.on_test_file_changed)
         
         # 코드 뷰어 그룹
         code_group = QGroupBox("함수 코드")
@@ -394,11 +426,86 @@ class ErrorAnalysisView(QWidget):
             if function_name:
                 self.show_function_code(function_name)
     
+    def load_test_file_list(self):
+        """테스트 파일 로드"""
+        try:
+            # 파일 목록 저장
+            self.file_combo.clear()
+            
+            for file_path in self.test_files:
+                if os.path.exists(file_path):
+                    self.file_combo.addItem(os.path.basename(file_path), file_path)
+            
+            # 파일이 없을 경우 "(No files)" 항목 추가
+            if self.file_combo.count() == 0:
+                self.file_combo.addItem("(파일 없음)", None)
+                print("Debug: No test files found")
+            else:
+                print(f"Debug: Loaded {self.file_combo.count()} test files")
+                # 첫 번째 파일을 기본값으로 설정
+                self.error_test_file = self.file_combo.itemData(0)
+                print(f"Debug: Set default test file to: {self.error_test_file}")
+                
+        except Exception as e:
+            print(f"Debug: Error loading test files: {str(e)}")
+            traceback.print_exc()
+            
+    def on_select_file_clicked(self):
+        """파일 선택 버튼 클릭 처리"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "테스트 파일 선택", "", "Python 파일 (*.py)"
+        )
+        
+        if file_path:
+            print(f"Debug: Selected file: {file_path}")
+            
+            # 이미 목록에 있는지 확인
+            for i in range(self.file_combo.count()):
+                if self.file_combo.itemData(i) == file_path:
+                    self.file_combo.setCurrentIndex(i)
+                    return
+            
+            # 새 파일 추가
+            self.file_combo.addItem(os.path.basename(file_path), file_path)
+            self.file_combo.setCurrentIndex(self.file_combo.count() - 1)
+            
+            # 파일 목록에 추가
+            if file_path not in self.test_files:
+                self.test_files.append(file_path)
+    
+    def on_test_file_changed(self, index):
+        """테스트 파일 변경 처리"""
+        if index < 0:
+            return
+            
+        # 현재 선택된 파일 데이터 가져오기
+        current_data = self.file_combo.itemData(index)
+        
+        # None 값 처리
+        if current_data is None:
+            print(f"Debug: No file data for index {index}")
+            return
+            
+        self.error_test_file = current_data
+        print(f"Debug: Changed test file to: {self.error_test_file}")
+        
+        # 함수 목록 다시 로드
+        self.load_test_functions()
+        
+        # 오류 데이터 새로고침
+        self.refresh_error_data()
+    
     def load_test_functions(self):
         """테스트 함수 목록 로드"""
         try:
             # 트리 초기화
             self.function_tree.clear()
+            
+            if self.error_test_file is None:
+                # 파일이 선택되지 않은 경우
+                item = QTreeWidgetItem(["파일을 선택하세요"])
+                self.function_tree.addTopLevelItem(item)
+                return
             
             if not os.path.exists(self.error_test_file):
                 # 파일이 없을 경우 메시지 표시
@@ -471,6 +578,10 @@ class ErrorAnalysisView(QWidget):
             func_pos: 함수 시작 위치 (없으면 이름으로 검색)
         """
         try:
+            if self.error_test_file is None:
+                self.code_editor.setText("파일이 선택되지 않았습니다. 파일을 먼저 선택하세요.")
+                return
+                
             if not os.path.exists(self.error_test_file):
                 self.code_editor.setText(f"테스트 파일을 찾을 수 없습니다: {self.error_test_file}")
                 return

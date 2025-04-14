@@ -182,6 +182,9 @@ class CallGraphView(QWidget):
         self.graph_thread = GraphGeneratorThread()
         self.graph_thread.finished.connect(self.on_graph_generated)
         
+        # 이벤트 연결
+        self.function_combo.currentIndexChanged.connect(self.on_function_selected)
+        
         # 샘플 그래프 표시
         self.show_sample_graph()
     
@@ -192,10 +195,15 @@ class CallGraphView(QWidget):
         # 상단 컨트롤 패널
         control_panel = QHBoxLayout()
         
-        # 함수명 입력
+        # 함수 선택 드롭박스 추가
         function_label = QLabel("함수:")
-        self.function_input = QLineEdit()
-        self.function_input.setPlaceholderText("함수명 입력...")
+        self.function_combo = QComboBox()
+        self.function_combo.setEditable(True)
+        self.function_combo.setMinimumWidth(200)
+        
+        # 기존 입력 필드 유지 (호환성)
+        self.function_input = self.function_combo.lineEdit()
+        self.function_input.setPlaceholderText("함수명 입력 또는 선택...")
         
         # 호출 깊이 선택
         depth_label = QLabel("호출 깊이:")
@@ -216,7 +224,7 @@ class CallGraphView(QWidget):
         
         # 컨트롤 패널에 위젯 추가
         control_panel.addWidget(function_label)
-        control_panel.addWidget(self.function_input)
+        control_panel.addWidget(self.function_combo)
         control_panel.addWidget(depth_label)
         control_panel.addWidget(self.depth_slider)
         control_panel.addWidget(self.depth_value)
@@ -393,6 +401,60 @@ class CallGraphView(QWidget):
         
         # 샘플 데이터로 UI 초기화
         self.function_input.setText("main")
+        
+        # 함수 목록 로드
+        self.load_function_list()
+    
+    def load_function_list(self):
+        """available functions list"""
+        try:
+            # test_errors.py 파일의 함수들 추출
+            # 테스트 코드 파일 경로
+            file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__))))), "test_errors.py")
+            
+            print(f"Debug: Loading functions from {file_path}")
+            
+            if not os.path.exists(file_path):
+                self.function_combo.addItem("main")
+                self.function_combo.addItem("process_data")
+                self.function_combo.addItem("calculate_average")
+                print(f"Debug: File not found, adding sample functions")
+                return
+            
+            # 파일에서 함수 정의 추출
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 함수 정의 찾기 (정규식)
+            function_pattern = re.compile(r'def\s+(\w+)\s*\(([^)]*)\):', re.MULTILINE)
+            matches = function_pattern.finditer(content)
+            
+            # 결과 추가
+            function_list = []
+            for match in matches:
+                func_name = match.group(1)
+                function_list.append(func_name)
+            
+            # 드롭박스에 함수 목록 추가
+            if function_list:
+                self.function_combo.clear()
+                for func in function_list:
+                    self.function_combo.addItem(func)
+                print(f"Debug: Added {len(function_list)} functions to dropdown")
+            else:
+                # 함수를 찾지 못한 경우 샘플 함수 추가
+                self.function_combo.addItem("main")
+                self.function_combo.addItem("process_data")
+                self.function_combo.addItem("calculate_average")
+                print(f"Debug: No functions found, adding sample functions")
+                
+        except Exception as e:
+            print(f"Debug: Error loading functions: {str(e)}")
+            # 샘플 함수 추가
+            self.function_combo.addItem("main")
+            self.function_combo.addItem("process_data")
+            self.function_combo.addItem("calculate_average")
     
     def get_function_code(self, func_name):
         """함수의 소스 코드 가져오기"""
@@ -624,6 +686,21 @@ class CallGraphView(QWidget):
             info_text += "<b>호출 받는 함수:</b> 없음<br>"
         
         self.func_details.setText(info_text)
+    
+    def on_function_selected(self, index):
+        """드롭박스에서 함수 선택 시 처리"""
+        if index < 0:  # 유효하지 않은 인덱스
+            return
+            
+        selected_function = self.function_combo.currentText()
+        print(f"Debug: Selected function from dropdown: {selected_function}")
+        
+        # 선택된 함수 코드 표시
+        code = self.get_function_code(selected_function)
+        self.code_editor.setText(code)
+        
+        # 필요하다면 그래프 자동 생성
+        # 여기서는 사용자가 그래프 생성 버튼을 명시적으로 누르도록 함
     
     def on_node_selected(self, node_id):
         """노드 선택 이벤트 처리"""
